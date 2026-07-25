@@ -6,7 +6,7 @@ The conversation tree is the primary navigation surface, not a sidebar. Each pi 
 
 See [DESIGN.md](./DESIGN.md) for the research-backed architecture (how superset does backgrounding, what pi gives us natively, semantic forest layout, grafting).
 
-## Status — M1 "Trunk"
+## Status — M2 "Forest"
 
 - ✅ `pinesd` daemon: watches `~/.pi/agent/sessions`, parses pi's v3 tree JSONL incrementally, spawns one `pi --mode rpc` child per active tree
 - ✅ Live status per tree, derived from pi's RPC events: `running` · `waiting (needs input)` · `idle` · `error` · `dormant`
@@ -15,7 +15,11 @@ See [DESIGN.md](./DESIGN.md) for the research-backed architecture (how superset 
 - ✅ **Fork to a new tree** from any node (pi `fork`, lineage tracked via `parentSession`)
 - ✅ Answer pi's interactive dialogs (select/confirm/input) from the UI while headless
 - ✅ Streaming assistant output over WebSocket; `Esc` returns to the forest without pausing anything
-- 🔜 M2 forest canvas + search · M3 semantic layout · M4 grafts (see DESIGN.md §7)
+- ✅ **Forest canvas**: each tree drawn as its actual branch silhouette with a color-coded status ring (running trees pulse, waiting trees get a `?`); wheel zoom + drag pan; hover cards; dotted lineage edges between forks and their parents
+- ✅ Stable positions: phyllotaxis-spiral placement persisted to `~/.pines/positions.json`; forks land next to their parent tree (M3 upgrades placement to embedding-kNN)
+- ✅ **Search** (`/`): token search across all node text in all trees, spotlight-dims the forest, jump straight to the matching node in its tree
+- ✅ Keyboard nav in a tree: `←` parent · `→` child (prefers the active path) · `↑`/`↓` siblings · `Esc` back to forest
+- 🔜 M3 semantic layout (embeddings + kNN placement + semantic search) · M4 grafts (see DESIGN.md §7)
 
 ## Quickstart
 

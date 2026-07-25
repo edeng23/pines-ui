@@ -5,6 +5,7 @@ import type {
   ServerEvent,
   PromptRequest,
   AnswerUiRequest,
+  SearchResult,
 } from "@pines/shared";
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
@@ -20,6 +21,8 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 
 export const api = {
   forest: () => fetch("/api/forest").then((r) => jsonOrThrow<TreeSummary[]>(r)),
+  search: (q: string) =>
+    fetch(`/api/search?q=${encodeURIComponent(q)}`).then((r) => jsonOrThrow<SearchResult[]>(r)),
   tree: (id: string) =>
     fetch(`/api/tree/${encodeURIComponent(id)}`).then((r) => jsonOrThrow<TreeDetail>(r)),
   node: (treeId: string, nodeId: string) =>

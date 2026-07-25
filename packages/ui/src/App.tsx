@@ -6,9 +6,12 @@ import type {
   ServerEvent,
   TreeStatus,
   PendingUiRequest,
+  SearchResult,
 } from "@pines/shared";
 import { api, openEvents } from "./api";
 import { TreeView } from "./TreeView";
+import { ForestCanvas } from "./ForestCanvas";
+import { SearchBar } from "./SearchBar";
 
 const STATUS_LABEL: Record<TreeStatus, string> = {
   running: "running",
@@ -22,15 +25,6 @@ function StatusDot({ status }: { status: TreeStatus }) {
   return <span className={`dot dot-${status}`} title={STATUS_LABEL[status]} />;
 }
 
-function timeAgo(iso: string): string {
-  if (!iso) return "";
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
 export default function App() {
   const [trees, setTrees] = useState<TreeSummary[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -39,9 +33,11 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<NodeDetail | null>(null);
   const [streamBuf, setStreamBuf] = useState<Record<string, string>>({});
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [spotlight, setSpotlight] = useState<Set<string> | null>(null);
   const openIdRef = useRef(openId);
   openIdRef.current = openId;
   const lastLeafRef = useRef<string | null>(null);
+  const jumpNodeRef = useRef<string | null>(null);
 
   const refreshDetail = useCallback((treeId: string) => {
     api
@@ -51,10 +47,14 @@ export default function App() {
           const prevLeaf = lastLeafRef.current;
           lastLeafRef.current = d.leafId;
           setDetail(d);
-          // Keep the user's selection, but follow the leaf as it grows.
-          setSelectedId((cur) =>
-            !cur || !d.nodes.some((n) => n.id === cur) || cur === prevLeaf ? d.leafId : cur,
-          );
+          const jump = jumpNodeRef.current;
+          jumpNodeRef.current = null;
+          // A search jump wins; otherwise keep the user's selection but
+          // follow the leaf as it grows.
+          setSelectedId((cur) => {
+            if (jump && d.nodes.some((n) => n.id === jump)) return jump;
+            return !cur || !d.nodes.some((n) => n.id === cur) || cur === prevLeaf ? d.leafId : cur;
+          });
         }
       })
       .catch((e: Error) => setErrorMsg(e.message));
@@ -127,16 +127,32 @@ export default function App() {
       .catch(() => setSelectedNode(null));
   }, [openId, selectedId, detail]);
 
-  // Esc goes back to the forest; the agent keeps running.
+  // Esc goes back to the forest; the agent keeps running. When typing,
+  // Esc just leaves the field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpenId(null);
+      if (e.key !== "Escape") return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = (el?.tagName ?? "").toLowerCase();
+      if (tag === "input" || tag === "textarea") {
+        el?.blur();
+        return;
+      }
+      setOpenId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const openTree = trees.find((t) => t.id === openId);
+
+  const openAt = useCallback((treeId: string, nodeId?: string) => {
+    jumpNodeRef.current = nodeId ?? null;
+    setOpenId((cur) => {
+      if (cur === treeId) refreshDetail(treeId);
+      return treeId;
+    });
+  }, [refreshDetail]);
 
   return (
     <div className="app">
@@ -149,6 +165,12 @@ export default function App() {
             / {openTree.title} <StatusDot status={openTree.status} />
           </span>
         )}
+        <SearchBar
+          onResults={(rs: SearchResult[] | null) =>
+            setSpotlight(rs ? new Set(rs.map((r) => r.treeId)) : null)
+          }
+          onPick={openAt}
+        />
         {errorMsg && (
           <span className="error" onClick={() => setErrorMsg(null)}>
             {errorMsg} ✕
@@ -156,7 +178,7 @@ export default function App() {
         )}
       </header>
       {!openId ? (
-        <ForestList trees={trees} onOpen={setOpenId} />
+        <ForestCanvas trees={trees} spotlight={spotlight} onOpen={setOpenId} />
       ) : detail ? (
         <TreePage
           detail={detail}
@@ -169,43 +191,6 @@ export default function App() {
       ) : (
         <div className="empty">loading…</div>
       )}
-    </div>
-  );
-}
-
-function ForestList({
-  trees,
-  onOpen,
-}: {
-  trees: TreeSummary[];
-  onOpen: (id: string) => void;
-}) {
-  if (trees.length === 0) {
-    return (
-      <div className="empty">
-        No trees yet. Start a pi session and it will appear here.
-      </div>
-    );
-  }
-  return (
-    <div className="forest">
-      {trees.map((t) => (
-        <div key={t.sessionPath} className="treecard" onClick={() => onOpen(t.id)}>
-          <div className="treecard-head">
-            <StatusDot status={t.status} />
-            <span className="treecard-title">{t.title}</span>
-          </div>
-          <div className="treecard-meta">
-            <span>{t.nodeCount} nodes</span>
-            <span>{timeAgo(t.updatedAt)}</span>
-            {t.parentSession && <span title={`forked from ${t.parentSession}`}>⑂ fork</span>}
-            <span className="cwd">{t.cwd}</span>
-          </div>
-          {t.status === "waiting" && t.pendingUiRequest && (
-            <div className="treecard-waiting">? {t.pendingUiRequest.title ?? "needs input"}</div>
-          )}
-        </div>
-      ))}
     </div>
   );
 }
@@ -229,6 +214,41 @@ function TreePage({
   const [busy, setBusy] = useState(false);
 
   const branching = !!selectedId && selectedId !== detail.leafId;
+
+  // Arrow-key navigation over the tree: ← parent, → child (preferring the
+  // active path), ↑/↓ siblings. Ignored while typing.
+  useEffect(() => {
+    const byId = new Map(detail.nodes.map((n) => [n.id, n]));
+    const childrenOf = (id: string) => detail.nodes.filter((n) => n.parentId === id);
+    const active = new Set(detail.activePath);
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (document.activeElement?.tagName ?? "").toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      if (!selectedId || !byId.has(selectedId)) return;
+      const cur = byId.get(selectedId)!;
+      if (e.key === "ArrowLeft" && cur.parentId && byId.has(cur.parentId)) {
+        e.preventDefault();
+        onSelect(cur.parentId);
+      } else if (e.key === "ArrowRight") {
+        const kids = childrenOf(cur.id);
+        if (kids.length > 0) {
+          e.preventDefault();
+          onSelect(kids.find((k) => active.has(k.id))?.id ?? kids[0].id);
+        }
+      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        if (!cur.parentId) return;
+        const siblings = childrenOf(cur.parentId);
+        const i = siblings.findIndex((s) => s.id === cur.id);
+        const next = siblings[i + (e.key === "ArrowDown" ? 1 : -1)];
+        if (next) {
+          e.preventDefault();
+          onSelect(next.id);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detail.nodes, detail.activePath, selectedId, onSelect]);
 
   const pathToSelected = useMemo(() => {
     if (!selectedId) return [];

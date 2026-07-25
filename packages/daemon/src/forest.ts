@@ -5,10 +5,19 @@
  */
 
 import { EventEmitter } from "node:events";
-import type { ServerEvent, TreeSummary, TreeDetail, TreeStatus, NodeDetail } from "@pines/shared";
+import type {
+  ServerEvent,
+  TreeSummary,
+  TreeDetail,
+  TreeStatus,
+  NodeDetail,
+  SearchResult,
+} from "@pines/shared";
 import { SessionIndexer } from "./indexer.js";
 import { SessionTree } from "./session.js";
 import { PiRunner, RunnerOptions } from "./runner.js";
+import { PositionStore } from "./positions.js";
+import { searchTrees } from "./search.js";
 
 export class Forest extends EventEmitter {
   runners = new Map<string, PiRunner>(); // keyed by sessionPath
@@ -16,6 +25,7 @@ export class Forest extends EventEmitter {
   constructor(
     public indexer: SessionIndexer,
     private runnerOpts: RunnerOptions,
+    private positions: PositionStore,
   ) {
     super();
     indexer.on("added", (tree: SessionTree) => {
@@ -30,6 +40,7 @@ export class Forest extends EventEmitter {
         void runner.stop();
         this.runners.delete(sessionPath);
       }
+      this.positions.remove(sessionPath);
       this.broadcast({ event: "tree_removed", treeId: sessionPath });
     });
   }
@@ -46,7 +57,15 @@ export class Forest extends EventEmitter {
     const s = tree.summary(this.statusOf(tree));
     const pending = this.runners.get(tree.sessionPath)?.pendingUiRequest;
     if (pending) s.pendingUiRequest = pending;
+    s.pos = this.positions.ensure(tree.sessionPath, tree.header?.parentSession);
+    const g = tree.glyph();
+    s.glyph = g.glyph;
+    s.glyphLeaf = g.glyphLeaf;
     return s;
+  }
+
+  search(query: string): SearchResult[] {
+    return searchTrees(this.indexer.trees.values(), (t) => this.statusOf(t), query);
   }
 
   list(): TreeSummary[] {

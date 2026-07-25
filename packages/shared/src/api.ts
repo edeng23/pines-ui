@@ -43,6 +43,33 @@ export interface TreeSummary {
   /** Path to the session file this one was forked from, if any. */
   parentSession?: string;
   pendingUiRequest?: PendingUiRequest;
+  /** Position in the forest plane (daemon-assigned, persisted). */
+  pos?: { x: number; y: number };
+  /**
+   * Compact branch topology for the forest glyph: one parent index per
+   * node in append order (-1 = root), capped at GLYPH_MAX_NODES.
+   */
+  glyph?: number[];
+  /** Index into `glyph` of the active-branch tip, if within the cap. */
+  glyphLeaf?: number;
+}
+
+export const GLYPH_MAX_NODES = 400;
+
+// ---- Search ----
+
+export interface SearchMatch {
+  nodeId: string;
+  role?: string;
+  preview: string;
+}
+
+export interface SearchResult {
+  treeId: string;
+  title: string;
+  status: TreeStatus;
+  score: number;
+  matches: SearchMatch[];
 }
 
 /** Full tree detail: summary + all nodes. */

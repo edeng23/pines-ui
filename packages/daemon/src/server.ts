@@ -30,6 +30,11 @@ export function createServer(forest: Forest): http.Server {
     res.json(forest.list());
   });
 
+  app.get("/api/search", (req, res) => {
+    const q = String(req.query.q ?? "").trim();
+    res.json(q ? forest.search(q) : []);
+  });
+
   app.get("/api/tree/:id", (req, res) => {
     const d = forest.detail(req.params.id);
     if (!d) return void res.status(404).json({ error: "tree not found" });

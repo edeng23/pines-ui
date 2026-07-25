@@ -12,7 +12,7 @@
 
 import { EventEmitter } from "node:events";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type {
@@ -65,7 +65,12 @@ export class PiRunner extends EventEmitter {
 
   ensureRunning(): void {
     if (this.child) return;
-    const cwd = this.tree.header?.cwd;
+    let cwd = this.tree.header?.cwd;
+    // Sessions can outlive their working directory; spawn would ENOENT.
+    if (cwd && !existsSync(cwd)) {
+      this.emit("log", `[pines] session cwd missing (${cwd}), running from daemon cwd`);
+      cwd = undefined;
+    }
     const args = [
       "--mode",
       "rpc",

@@ -13,6 +13,7 @@ import {
   SessionEntry,
   MessageEntry,
   contentText,
+  GLYPH_MAX_NODES,
 } from "@pines/shared";
 import type { TreeNode, TreeSummary, TreeDetail, NodeDetail, TreeStatus } from "@pines/shared";
 
@@ -191,6 +192,27 @@ export class SessionTree {
       text = this.entryPreview(e).preview;
     }
     return { id: e.id, parentId: e.parentId, type: e.type, role, timestamp: e.timestamp, text, toolName, isError, model };
+  }
+
+  /**
+   * Compact topology for the forest glyph: parent index per node in
+   * append order (-1 = root). Bookkeeping entries are skipped, matching
+   * nodes(). Trees over the cap keep their first GLYPH_MAX_NODES nodes —
+   * the silhouette of an old tree barely changes at the tip.
+   */
+  glyph(): { glyph: number[]; glyphLeaf?: number } {
+    const glyph: number[] = [];
+    const indexById = new Map<string, number>();
+    let leafIndex: number | undefined;
+    for (const e of this.entries) {
+      if (e.type === "label" || e.type === "session_info") continue;
+      if (glyph.length >= GLYPH_MAX_NODES) break;
+      const idx = glyph.length;
+      indexById.set(e.id, idx);
+      glyph.push(e.parentId != null ? (indexById.get(e.parentId) ?? -1) : -1);
+      if (e.id === this.leafId) leafIndex = idx;
+    }
+    return { glyph, glyphLeaf: leafIndex };
   }
 
   summary(status: TreeStatus): TreeSummary {
