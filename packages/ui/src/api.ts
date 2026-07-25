@@ -45,6 +45,14 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => jsonOrThrow<{ ok: boolean }>(r)),
+  openTerminal: (treeId: string) =>
+    fetch(`/api/tree/${encodeURIComponent(treeId)}/terminal`, { method: "POST" }).then((r) =>
+      jsonOrThrow<{ ok: boolean; ws: string }>(r),
+    ),
+  closeTerminal: (treeId: string) =>
+    fetch(`/api/tree/${encodeURIComponent(treeId)}/terminal`, { method: "DELETE" }).then((r) =>
+      jsonOrThrow<{ ok: boolean }>(r),
+    ),
   fork: (treeId: string, nodeId: string) =>
     fetch(`/api/tree/${encodeURIComponent(treeId)}/fork`, {
       method: "POST",

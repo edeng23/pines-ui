@@ -50,6 +50,11 @@ export function createServer(forest: Forest): http.Server {
   app.post("/api/tree/:id/prompt", (req, res) => {
     const tree = forest.find(req.params.id);
     if (!tree) return void res.status(404).json({ error: "tree not found" });
+    if (forest.hasTerminal(tree)) {
+      return void res
+        .status(409)
+        .json({ error: "a terminal is attached to this tree — close it to prompt headlessly" });
+    }
     const body = req.body as PromptRequest;
     if (!body?.message?.trim()) {
       return void res.status(400).json({ error: "message required" });
@@ -94,6 +99,22 @@ export function createServer(forest: Forest): http.Server {
       .catch((e: Error) => res.status(500).json({ error: e.message }));
   });
 
+  app.post("/api/tree/:id/terminal", (req, res) => {
+    const tree = forest.find(req.params.id);
+    if (!tree) return void res.status(404).json({ error: "tree not found" });
+    forest
+      .openTerminal(tree)
+      .then(() => res.json({ ok: true, ws: `/ws/term/${encodeURIComponent(req.params.id)}` }))
+      .catch((e: Error) => res.status(500).json({ error: e.message }));
+  });
+
+  app.delete("/api/tree/:id/terminal", (req, res) => {
+    const tree = forest.find(req.params.id);
+    if (!tree) return void res.status(404).json({ error: "tree not found" });
+    forest.closeTerminal(tree);
+    res.json({ ok: true });
+  });
+
   // Serve the built UI when available.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const uiDist = path.resolve(here, "../../ui/dist");
@@ -105,7 +126,19 @@ export function createServer(forest: Forest): http.Server {
   }
 
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({ noServer: true });
+  const termWss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (req, socket, head) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/ws") {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    } else if (url.pathname.startsWith("/ws/term/")) {
+      termWss.handleUpgrade(req, socket, head, (ws) => termWss.emit("connection", ws, req));
+    } else {
+      socket.destroy();
+    }
+  });
 
   const send = (ws: WebSocket, ev: ServerEvent) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(ev));
@@ -117,6 +150,46 @@ export function createServer(forest: Forest): http.Server {
 
   forest.on("broadcast", (ev: ServerEvent) => {
     for (const ws of wss.clients) send(ws, ev);
+  });
+
+  // Terminal attach: raw pi TUI I/O over one socket per viewer.
+  termWss.on("connection", (ws, req) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const treeId = decodeURIComponent(url.pathname.slice("/ws/term/".length));
+    const tree = forest.find(treeId);
+    const term = tree ? forest.terminals.get(tree.sessionPath) : undefined;
+    if (!tree || !term || term.exited) {
+      ws.send(JSON.stringify({ type: "exit", code: -1 }));
+      ws.close();
+      return;
+    }
+    ws.send(JSON.stringify({ type: "output", data: term.scrollback() }));
+    const onData = (data: string) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "output", data }));
+    };
+    const onExit = (code: number) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "exit", code }));
+        ws.close();
+      }
+    };
+    term.on("data", onData);
+    term.on("exit", onExit);
+    ws.on("message", (raw) => {
+      let msg: { type?: string; data?: string; cols?: number; rows?: number };
+      try {
+        msg = JSON.parse(String(raw));
+      } catch {
+        return;
+      }
+      if (msg.type === "input" && typeof msg.data === "string") term.write(msg.data);
+      else if (msg.type === "resize" && msg.cols && msg.rows) term.resize(msg.cols, msg.rows);
+    });
+    ws.on("close", () => {
+      // Detach only — the PTY keeps running in the daemon.
+      term.off("data", onData);
+      term.off("exit", onExit);
+    });
   });
 
   return server;

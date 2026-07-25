@@ -52,6 +52,8 @@ export interface TreeSummary {
   glyph?: number[];
   /** Index into `glyph` of the active-branch tip, if within the cap. */
   glyphLeaf?: number;
+  /** True when a PTY terminal (pi TUI) is attached to this tree. */
+  terminalAttached?: boolean;
 }
 
 export const GLYPH_MAX_NODES = 400;
@@ -98,7 +100,13 @@ export type ServerEvent =
   | { event: "forest"; trees: TreeSummary[] }
   | { event: "tree_updated"; tree: TreeSummary }
   | { event: "tree_removed"; treeId: string }
-  | { event: "status"; treeId: string; status: TreeStatus; pendingUiRequest?: PendingUiRequest | null }
+  | {
+      event: "status";
+      treeId: string;
+      status: TreeStatus;
+      pendingUiRequest?: PendingUiRequest | null;
+      terminalAttached?: boolean;
+    }
   | { event: "stream"; treeId: string; kind: "text" | "thinking" | "tool"; delta: string }
   | { event: "runner_log"; treeId: string; line: string };
 

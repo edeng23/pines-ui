@@ -14,6 +14,7 @@ See [DESIGN.md](./DESIGN.md) for the research-backed architecture (how superset 
 - ✅ **Continue from any node** — grows a new branch in place (pi-native tree, single session file)
 - ✅ **Fork to a new tree** from any node (pi `fork`, lineage tracked via `parentSession`)
 - ✅ Answer pi's interactive dialogs (select/confirm/input) from the UI while headless
+- ✅ **Embedded terminal** (superset-style): open the real pi TUI for any tree in an xterm.js pane backed by a daemon-side PTY; detaching leaves pi running (⌨ marker in the forest) and reattaching replays scrollback — the git graph keeps updating live beside it
 - ✅ Streaming assistant output over WebSocket; `Esc` returns to the forest without pausing anything
 - ✅ **Forest canvas**: each tree drawn as its actual branch silhouette with a color-coded status ring (running trees pulse, waiting trees get a `?`); wheel zoom + drag pan; hover cards; dotted lineage edges between forks and their parents
 - ✅ Stable positions: phyllotaxis-spiral placement persisted to `~/.pines/positions.json`; forks land next to their parent tree (M3 upgrades placement to embedding-kNN)
@@ -40,6 +41,7 @@ Environment:
 | `PINES_PORT` | `7314` | HTTP/WS port |
 | `PINES_SESSION_DIR` | `~/.pi/agent/sessions` | pi's session storage |
 | `PINES_PI_BIN` | `pi` | pi binary to spawn |
+| `PINES_TERM_CMD` | `<pi> --session {session}` | command for embedded terminals |
 
 ### Try it without API keys
 

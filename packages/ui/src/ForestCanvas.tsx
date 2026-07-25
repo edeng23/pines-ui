@@ -243,6 +243,14 @@ export function ForestCanvas({
           ctx.textBaseline = "alphabetic";
         }
 
+        // terminal marker
+        if (t.terminalAttached) {
+          ctx.font = `${Math.max(9, 11 * s)}px ui-sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#9aa4b2";
+          ctx.fillText("⌨", cx - ringR * 0.72, cy - ringR * 0.62);
+        }
+
         // title
         if (s > 0.32) {
           ctx.fillStyle = dimmed ? "rgba(125, 136, 150, 0.4)" : "#9aa4b2";

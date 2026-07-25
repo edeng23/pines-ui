@@ -12,6 +12,7 @@ import { api, openEvents } from "./api";
 import { TreeView } from "./TreeView";
 import { ForestCanvas } from "./ForestCanvas";
 import { SearchBar } from "./SearchBar";
+import { TerminalPane } from "./TerminalPane";
 
 const STATUS_LABEL: Record<TreeStatus, string> = {
   running: "running",
@@ -77,25 +78,23 @@ export default function App() {
         case "tree_removed":
           setTrees((ts) => ts.filter((t) => t.id !== ev.treeId && t.sessionPath !== ev.treeId));
           break;
-        case "status":
+        case "status": {
           // The live stream row is only shown while running; drop the buffer
           // once the turn ends (the entries have landed in the tree by then).
           if (ev.status !== "running") {
             setStreamBuf((b) => ({ ...b, [ev.treeId]: "" }));
           }
-          setTrees((ts) =>
-            ts.map((t) =>
-              t.id === ev.treeId
-                ? { ...t, status: ev.status, pendingUiRequest: ev.pendingUiRequest ?? undefined }
-                : t,
-            ),
-          );
+          const patch = (t: { terminalAttached?: boolean }) => ({
+            status: ev.status,
+            pendingUiRequest: ev.pendingUiRequest ?? undefined,
+            terminalAttached: ev.terminalAttached ?? t.terminalAttached,
+          });
+          setTrees((ts) => ts.map((t) => (t.id === ev.treeId ? { ...t, ...patch(t) } : t)));
           if (openIdRef.current === ev.treeId) {
-            setDetail((d) =>
-              d ? { ...d, status: ev.status, pendingUiRequest: ev.pendingUiRequest ?? undefined } : d,
-            );
+            setDetail((d) => (d ? { ...d, ...patch(d) } : d));
           }
           break;
+        }
         case "stream":
           if (ev.kind === "text") {
             setStreamBuf((b) => ({ ...b, [ev.treeId]: (b[ev.treeId] ?? "") + ev.delta }));
@@ -212,8 +211,27 @@ function TreePage({
 }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
 
   const branching = !!selectedId && selectedId !== detail.leafId;
+  const termAttached = !!detail.terminalAttached;
+
+  const openTerminal = async () => {
+    try {
+      await api.openTerminal(detail.id);
+      setShowTerminal(true);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+  const closeTerminal = async () => {
+    try {
+      await api.closeTerminal(detail.id);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+    setShowTerminal(false);
+  };
 
   // Arrow-key navigation over the tree: ← parent, → child (preferring the
   // active path), ↑/↓ siblings. Ignored while typing.
@@ -302,7 +320,30 @@ function TreePage({
       <div className="treepane">
         <TreeView tree={detail} selectedId={selectedId} onSelect={onSelect} />
       </div>
-      <div className="sidepane">
+      <div className={"sidepane" + (showTerminal ? " sidepane-term" : "")}>
+        <div className="panebar">
+          <span className="panebar-title">
+            {showTerminal ? "pi terminal" : "transcript"}
+          </span>
+          {showTerminal ? (
+            <>
+              <button className="panebar-btn" onClick={() => setShowTerminal(false)} title="Leave pi running and go back to the transcript">
+                ⇤ detach
+              </button>
+              <button className="panebar-btn btn-danger" onClick={() => void closeTerminal()} title="Terminate the pi TUI process">
+                ✕ close
+              </button>
+            </>
+          ) : (
+            <button className="panebar-btn" onClick={() => void openTerminal()} title="Open the real pi TUI for this tree">
+              ⌨ {termAttached ? "reattach terminal" : "terminal"}
+            </button>
+          )}
+        </div>
+        {showTerminal ? (
+          <TerminalPane treeId={detail.id} onExit={() => setShowTerminal(false)} />
+        ) : (
+          <>
         <div className="transcript">
           {pathToSelected.map((n) => (
             <div key={n.id} className={`msg msg-${n.role ?? n.type}`}>
@@ -322,6 +363,21 @@ function TreePage({
         {detail.status === "waiting" && detail.pendingUiRequest && (
           <UiRequestForm req={detail.pendingUiRequest} onAnswer={answer} />
         )}
+        {termAttached ? (
+          <div className="composer">
+            <div className="branchnote">
+              ⌨ a terminal holds this session —
+              <button className="linkbtn" onClick={() => setShowTerminal(true)}>
+                reattach
+              </button>
+              or
+              <button className="linkbtn" onClick={() => void closeTerminal()}>
+                close it
+              </button>
+              to prompt from here
+            </div>
+          </div>
+        ) : (
         <div className="composer">
           {branching && (
             <div className="branchnote">
@@ -358,6 +414,9 @@ function TreePage({
             )}
           </div>
         </div>
+        )}
+          </>
+        )}
       </div>
     </div>
   );

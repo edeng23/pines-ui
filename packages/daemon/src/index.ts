@@ -24,7 +24,10 @@ const dataDir = defaultDataDir();
 
 const indexer = new SessionIndexer(sessionDir);
 const positions = new PositionStore(dataDir);
-const forest = new Forest(indexer, { piBin }, positions);
+const forest = new Forest(indexer, { piBin }, positions, {
+  piBin,
+  termCmd: process.env.PINES_TERM_CMD,
+});
 
 await indexer.start();
 const server = createServer(forest);
