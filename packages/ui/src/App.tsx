@@ -341,12 +341,19 @@ function TreePage({
           />
           <div className="composer-actions">
             {detail.status === "running" ? (
-              <button onClick={() => api.abort(detail.id).catch((e: Error) => onError(e.message))}>
+              <button
+                className="btn-danger"
+                onClick={() => api.abort(detail.id).catch((e: Error) => onError(e.message))}
+              >
                 ■ abort
               </button>
             ) : (
-              <button onClick={() => void send()} disabled={!message.trim() || busy}>
-                {branching ? "⑂ branch & send" : "send"} (⌘↵)
+              <button
+                className="btn-primary"
+                onClick={() => void send()}
+                disabled={!message.trim() || busy}
+              >
+                {branching ? "⑂ branch & send" : "send"} ⌘↵
               </button>
             )}
           </div>

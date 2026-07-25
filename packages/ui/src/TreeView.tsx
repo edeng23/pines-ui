@@ -1,21 +1,45 @@
-import { useMemo } from "react";
-import type { TreeDetail } from "@pines/shared";
-import { layoutTree, COL, ROW } from "./layout";
+import { useEffect, useMemo, useRef } from "react";
+import type { TreeDetail, TreeNode } from "@pines/shared";
+import { buildGraph, laneColor } from "./gitgraph";
 
-const ROLE_COLOR: Record<string, string> = {
-  user: "#7cc4ff",
-  assistant: "#8fd694",
-  toolResult: "#c9a86a",
-  bashExecution: "#c9a86a",
-  custom: "#a98fd6",
-  branchSummary: "#d68fb8",
-  compactionSummary: "#d68fb8",
-};
+const ROW = 34;
+const LANE_W = 16;
+const PAD_X = 14;
+const PAD_Y = 8;
+const CURVE = 12;
 
-function nodeColor(type: string, role?: string): string {
-  if (role && ROLE_COLOR[role]) return ROLE_COLOR[role];
-  if (type === "compaction" || type === "branch_summary") return "#d68fb8";
-  return "#8b949e";
+function roleOf(n: TreeNode): { key: string; label: string } {
+  const r = n.role ?? n.type;
+  switch (r) {
+    case "user":
+      return { key: "user", label: "user" };
+    case "assistant":
+      return { key: "assistant", label: "asst" };
+    case "toolResult":
+      return { key: "tool", label: "tool" };
+    case "bashExecution":
+      return { key: "tool", label: "bash" };
+    case "branchSummary":
+    case "branch_summary":
+      return { key: "branch", label: "branch" };
+    case "compactionSummary":
+    case "compaction":
+      return { key: "branch", label: "compact" };
+    case "custom":
+      return { key: "custom", label: n.type === "custom" ? "pines" : "custom" };
+    case "model_change":
+      return { key: "meta", label: "model" };
+    case "thinking_level_change":
+      return { key: "meta", label: "think" };
+    default:
+      return { key: "meta", label: r.slice(0, 7) };
+  }
+}
+
+function shortTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export function TreeView({
@@ -27,68 +51,115 @@ export function TreeView({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const layout = useMemo(() => layoutTree(tree.nodes), [tree.nodes]);
+  const graph = useMemo(() => buildGraph(tree.nodes), [tree.nodes]);
   const active = useMemo(() => new Set(tree.activePath), [tree.activePath]);
+  const rowsRef = useRef<HTMLDivElement | null>(null);
 
-  const placed = [...layout.values()];
-  const width = Math.max(...placed.map((p) => p.x), 0) + COL + 40;
-  const height = Math.max(...placed.map((p) => p.y), 0) + ROW + 20;
+  const gutterW = PAD_X * 2 + graph.laneCount * LANE_W;
+  const height = PAD_Y * 2 + graph.rows.length * ROW;
+  const laneX = (l: number) => PAD_X + l * LANE_W + LANE_W / 2;
+  const rowY = (r: number) => PAD_Y + r * ROW + ROW / 2;
+
+  // Keep the selected row in view (e.g. after keyboard nav / search jump).
+  useEffect(() => {
+    if (!selectedId || !rowsRef.current) return;
+    const i = graph.rows.findIndex((r) => r.node.id === selectedId);
+    const el = rowsRef.current.children[i] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selectedId, graph.rows]);
+
+  const edgePath = (e: { fromRow: number; fromLane: number; toRow: number; toLane: number }) => {
+    const fx = laneX(e.fromLane);
+    const fy = rowY(e.fromRow);
+    const tx = laneX(e.toLane);
+    const ty = rowY(e.toRow);
+    if (e.fromLane === e.toLane) return `M ${fx} ${fy} L ${tx} ${ty}`;
+    // Swing into the target lane within the first row, then rail down.
+    const cy = fy + ROW;
+    return (
+      `M ${fx} ${fy} C ${fx} ${fy + CURVE}, ${tx} ${cy - CURVE}, ${tx} ${cy}` +
+      (ty > cy ? ` L ${tx} ${ty}` : "")
+    );
+  };
 
   return (
-    <svg
-      className="treeview"
-      width={width}
-      height={height}
-      viewBox={`-20 -14 ${width} ${height}`}
-    >
-      {placed.map((p) => {
-        const parent = p.node.parentId ? layout.get(p.node.parentId) : null;
-        if (!parent) return null;
-        const onActive = active.has(p.node.id) && active.has(parent.node.id);
-        const mx = (parent.x + p.x) / 2;
-        return (
-          <path
-            key={`e-${p.node.id}`}
-            d={`M ${parent.x} ${parent.y} C ${mx} ${parent.y}, ${mx} ${p.y}, ${p.x} ${p.y}`}
-            fill="none"
-            stroke={onActive ? "#4d8f57" : "#30363d"}
-            strokeWidth={onActive ? 2.5 : 1.5}
-          />
-        );
-      })}
-      {placed.map((p) => {
-        const isLeaf = tree.leafId === p.node.id;
-        const isSelected = selectedId === p.node.id;
-        return (
-          <g
-            key={p.node.id}
-            transform={`translate(${p.x} ${p.y})`}
-            className="treenode"
-            onClick={() => onSelect(p.node.id)}
-          >
-            <title>{`${p.node.role ?? p.node.type}: ${p.node.preview}`}</title>
-            {isSelected && <circle r={11} fill="none" stroke="#e3b341" strokeWidth={2} />}
-            {isLeaf && tree.status === "running" && (
-              <circle r={13} fill="none" stroke="#4d8f57" strokeWidth={1.5} opacity={0.7}>
-                <animate attributeName="r" values="10;15;10" dur="1.6s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.8;0.1;0.8" dur="1.6s" repeatCount="indefinite" />
-              </circle>
-            )}
-            <circle
-              r={7}
-              fill={nodeColor(p.node.type, p.node.role)}
-              opacity={active.has(p.node.id) ? 1 : 0.45}
-              stroke={isLeaf ? "#e6edf3" : "none"}
-              strokeWidth={isLeaf ? 1.5 : 0}
+    <div className="gittree" style={{ minHeight: height }}>
+      <div className="gittree-rows" ref={rowsRef}>
+        {graph.rows.map((r) => {
+          const isSelected = selectedId === r.node.id;
+          const isLeaf = tree.leafId === r.node.id;
+          const onActive = active.has(r.node.id);
+          const role = roleOf(r.node);
+          return (
+            <div
+              key={r.node.id}
+              className={
+                "gitrow" +
+                (isSelected ? " gitrow-selected" : "") +
+                (onActive ? "" : " gitrow-inactive")
+              }
+              style={{ height: ROW, paddingLeft: gutterW + 6 }}
+              onClick={() => onSelect(r.node.id)}
+              title={r.node.preview}
+            >
+              <span className={`rolebadge role-${role.key}`}>{role.label}</span>
+              <span className="gitrow-preview">{r.node.preview || "—"}</span>
+              {r.node.label && <span className="tagchip">⌂ {r.node.label}</span>}
+              {isLeaf && (
+                <span className={`tipchip${tree.status === "running" ? " tipchip-live" : ""}`}>
+                  {tree.status === "running" ? "● running" : "tip"}
+                </span>
+              )}
+              <span className="gitrow-time">{shortTime(r.node.timestamp)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <svg className="gittree-graph" width={gutterW} height={height}>
+        {graph.edges.map((e, i) => {
+          const child = graph.rows[e.toRow];
+          const edgeActive = active.has(child.node.id) && active.has(graph.rows[e.fromRow].node.id);
+          return (
+            <path
+              key={i}
+              d={edgePath(e)}
+              fill="none"
+              stroke={laneColor(e.toLane)}
+              strokeWidth={edgeActive ? 2 : 1.5}
+              opacity={edgeActive ? 0.95 : 0.35}
             />
-            {p.node.label && (
-              <text x={0} y={-13} textAnchor="middle" className="nodelabel">
-                {p.node.label}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+          );
+        })}
+        {graph.rows.map((r) => {
+          const isSelected = selectedId === r.node.id;
+          const isLeaf = tree.leafId === r.node.id;
+          const onActive = active.has(r.node.id);
+          const cx = laneX(r.lane);
+          const cy = rowY(r.row);
+          return (
+            <g key={r.node.id}>
+              {isLeaf && tree.status === "running" && (
+                <circle cx={cx} cy={cy} r={8} fill="none" stroke={laneColor(r.lane)} strokeWidth={1.5}>
+                  <animate attributeName="r" values="6;11;6" dur="1.8s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.8;0;0.8" dur="1.8s" repeatCount="indefinite" />
+                </circle>
+              )}
+              <circle
+                cx={cx}
+                cy={cy}
+                r={isLeaf ? 5 : 4}
+                fill={onActive ? laneColor(r.lane) : "#0b0e14"}
+                stroke={laneColor(r.lane)}
+                strokeWidth={1.5}
+                opacity={onActive ? 1 : 0.5}
+              />
+              {isSelected && (
+                <circle cx={cx} cy={cy} r={8.5} fill="none" stroke="#e6edf3" strokeWidth={1.4} />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
