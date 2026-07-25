@@ -16,7 +16,7 @@ import { Forest } from "./forest.js";
 import { createServer } from "./server.js";
 import { defaultPiBin, defaultSessionDir } from "./runner.js";
 import { PositionStore, defaultDataDir } from "./positions.js";
-import { resolveExecutable } from "./exec.js";
+import { resolveExecutable, ptySelfTest } from "./exec.js";
 
 const port = Number(process.env.PINES_PORT ?? 7314);
 const sessionDir = defaultSessionDir();
@@ -44,6 +44,9 @@ server.listen(port, () => {
         `  or set PINES_PI_BIN to its full path (run: which pi).`,
     );
   }
+  void ptySelfTest().then((problem) => {
+    if (problem) console.warn(`⚠ embedded terminals unavailable:\n${problem}`);
+  });
 });
 
 async function shutdown(): Promise<void> {

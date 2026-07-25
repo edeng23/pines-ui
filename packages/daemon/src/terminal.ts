@@ -12,10 +12,10 @@
  */
 
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, chmodSync } from "node:fs";
 import * as pty from "node-pty";
 import { SessionTree } from "./session.js";
-import { resolveExecutable, userShell } from "./exec.js";
+import { resolveExecutable, userShell, ptyHelperPath, ptyFailureHint } from "./exec.js";
 
 const RING_BUFFER_LIMIT = 256 * 1024; // bytes of scrollback replayed on attach
 const IDLE_AFTER_MS = 4000;
@@ -27,7 +27,8 @@ export interface TerminalOptions {
 }
 
 export class TerminalSession extends EventEmitter {
-  private proc: pty.IPty;
+  // Definite-assignment: the constructor either assigns this or throws.
+  private proc!: pty.IPty;
   private ring: Buffer[] = [];
   private ringBytes = 0;
   /** Timestamp of the last session-file append (fed by the indexer). */
@@ -54,20 +55,34 @@ export class TerminalSession extends EventEmitter {
     const [spawnFile, spawnArgs] = resolved
       ? [resolved, args]
       : [userShell(), ["-lc", cmdline]];
-    try {
-      this.proc = pty.spawn(spawnFile, spawnArgs, {
+    const doSpawn = () =>
+      pty.spawn(spawnFile, spawnArgs, {
         name: "xterm-256color",
         cols: 120,
         rows: 32,
         cwd: cwd ?? process.cwd(),
         env: process.env as Record<string, string>,
       });
+    try {
+      this.proc = doSpawn();
     } catch (e) {
-      throw new Error(
-        `failed to start terminal (${cmdline}): ${(e as Error).message}. ` +
-          `Is pi installed and on PATH? Set PINES_PI_BIN to the binary's full path ` +
-          `(try: which pi) or override PINES_TERM_CMD.`,
-      );
+      // macOS: a spawn-helper that lost its exec bit is self-healable.
+      let recovered = false;
+      const helper = ptyHelperPath();
+      if (process.platform === "darwin" && helper) {
+        try {
+          chmodSync(helper, 0o755);
+          this.proc = doSpawn();
+          recovered = true;
+        } catch {
+          // fall through to the diagnostic error
+        }
+      }
+      if (!recovered) {
+        throw new Error(
+          `failed to start terminal (${cmdline}): ${(e as Error).message}\n${ptyFailureHint()}`,
+        );
+      }
     }
     this.proc.onData((data) => {
       const buf = Buffer.from(data, "utf8");
