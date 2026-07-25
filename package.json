@@ -1,0 +1,18 @@
+{
+  "name": "pines",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tree-first orchestration environment for pi coding agents",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @pines/shared -w @pines/daemon -w @pines/ui",
+    "test": "npm test -w @pines/daemon",
+    "dev": "npm run dev -w @pines/daemon",
+    "start": "node packages/daemon/dist/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
