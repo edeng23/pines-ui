@@ -25,6 +25,7 @@ import type {
   AnswerUiRequest,
 } from "@pines/shared";
 import { SessionTree } from "./session.js";
+import { resolveExecutable } from "./exec.js";
 
 export interface RunnerOptions {
   piBin: string;
@@ -65,6 +66,14 @@ export class PiRunner extends EventEmitter {
 
   ensureRunning(): void {
     if (this.child) return;
+    const bin = resolveExecutable(this.opts.piBin);
+    if (!bin) {
+      this.setStatus("error");
+      throw new Error(
+        `pi binary not found: "${this.opts.piBin}". Install pi or set PINES_PI_BIN ` +
+          `to its full path (try: which pi).`,
+      );
+    }
     let cwd = this.tree.header?.cwd;
     // Sessions can outlive their working directory; spawn would ENOENT.
     if (cwd && !existsSync(cwd)) {
@@ -79,7 +88,7 @@ export class PiRunner extends EventEmitter {
       ...(this.opts.piArgs ?? []),
     ];
     this.stopping = false;
-    this.child = spawn(this.opts.piBin, args, {
+    this.child = spawn(bin, args, {
       cwd: cwd && cwd.length > 0 ? cwd : undefined,
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,

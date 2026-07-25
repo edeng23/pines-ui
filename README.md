@@ -54,6 +54,21 @@ PINES_SESSION_DIR=/tmp/pines-demo PINES_PI_BIN=$PWD/packages/daemon/mock/mock-pi
 
 Prompts containing `ask me` make the mock raise an interactive question (→ `waiting` status); `fail` makes it error.
 
+### Troubleshooting
+
+**`posix_spawnp failed` / agents stuck on `error`** — pinesd can't find the
+`pi` executable. This usually means pi lives in a PATH set up by your shell
+profile (nvm, volta, homebrew) that the daemon didn't inherit. Fix with:
+
+```bash
+PINES_PI_BIN="$(which pi)" node packages/daemon/dist/index.js
+```
+
+pinesd warns at startup when the configured binary can't be resolved.
+Embedded terminals additionally fall back to running the command through
+your login shell (`$SHELL -lc`), so they pick up your profile's PATH even
+when the daemon didn't.
+
 ### Development
 
 ```bash

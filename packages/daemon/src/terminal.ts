@@ -15,6 +15,7 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import * as pty from "node-pty";
 import { SessionTree } from "./session.js";
+import { resolveExecutable, userShell } from "./exec.js";
 
 const RING_BUFFER_LIMIT = 256 * 1024; // bytes of scrollback replayed on attach
 const IDLE_AFTER_MS = 4000;
@@ -45,13 +46,29 @@ export class TerminalSession extends EventEmitter {
       tree.sessionPath,
     );
     const [file, ...args] = splitCommand(cmdline);
-    this.proc = pty.spawn(file, args, {
-      name: "xterm-256color",
-      cols: 120,
-      rows: 32,
-      cwd: cwd ?? process.cwd(),
-      env: process.env as Record<string, string>,
-    });
+    // Resolve the binary ourselves; if it isn't on the daemon's PATH,
+    // run through the user's login shell so their profile PATH applies
+    // (pi installed via nvm/volta/etc.). Raw node-pty failures surface
+    // as an unhelpful "posix_spawnp failed" otherwise.
+    const resolved = resolveExecutable(file);
+    const [spawnFile, spawnArgs] = resolved
+      ? [resolved, args]
+      : [userShell(), ["-lc", cmdline]];
+    try {
+      this.proc = pty.spawn(spawnFile, spawnArgs, {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 32,
+        cwd: cwd ?? process.cwd(),
+        env: process.env as Record<string, string>,
+      });
+    } catch (e) {
+      throw new Error(
+        `failed to start terminal (${cmdline}): ${(e as Error).message}. ` +
+          `Is pi installed and on PATH? Set PINES_PI_BIN to the binary's full path ` +
+          `(try: which pi) or override PINES_TERM_CMD.`,
+      );
+    }
     this.proc.onData((data) => {
       const buf = Buffer.from(data, "utf8");
       this.ring.push(buf);

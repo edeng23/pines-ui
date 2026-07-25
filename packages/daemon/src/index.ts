@@ -16,6 +16,7 @@ import { Forest } from "./forest.js";
 import { createServer } from "./server.js";
 import { defaultPiBin, defaultSessionDir } from "./runner.js";
 import { PositionStore, defaultDataDir } from "./positions.js";
+import { resolveExecutable } from "./exec.js";
 
 const port = Number(process.env.PINES_PORT ?? 7314);
 const sessionDir = defaultSessionDir();
@@ -35,8 +36,14 @@ server.listen(port, () => {
   console.log(`pinesd listening on http://localhost:${port}`);
   console.log(`  session dir: ${sessionDir}`);
   console.log(`  data dir:    ${dataDir}`);
-  console.log(`  pi binary:   ${piBin}`);
+  console.log(`  pi binary:   ${piBin}${resolveExecutable(piBin) ? "" : "  ⚠ NOT FOUND"}`);
   console.log(`  trees:       ${indexer.trees.size}`);
+  if (!resolveExecutable(piBin)) {
+    console.warn(
+      `⚠ "${piBin}" is not on pinesd's PATH. Agents won't start until you install pi\n` +
+        `  or set PINES_PI_BIN to its full path (run: which pi).`,
+    );
+  }
 });
 
 async function shutdown(): Promise<void> {

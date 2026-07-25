@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { SessionTree } from "./session.js";
 import { TerminalSession } from "./terminal.js";
+import { resolveExecutable } from "./exec.js";
 
 function makeTree(dir: string): SessionTree {
   const p = path.join(dir, "s.jsonl");
@@ -15,6 +16,15 @@ function makeTree(dir: string): SessionTree {
   t.append(JSON.stringify({ type: "session", version: 3, id: "t", timestamp: "t", cwd: dir }) + "\n");
   return t;
 }
+
+describe("resolveExecutable", () => {
+  it("resolves PATH commands and absolute paths, rejects missing ones", () => {
+    expect(resolveExecutable("bash")).toMatch(/\/bash$/);
+    expect(resolveExecutable(process.execPath)).toBe(process.execPath);
+    expect(resolveExecutable("definitely-not-a-real-binary-xyz")).toBeNull();
+    expect(resolveExecutable("/no/such/path/pi")).toBeNull();
+  });
+});
 
 describe("TerminalSession", () => {
   let dir: string;
@@ -41,6 +51,20 @@ describe("TerminalSession", () => {
     // scrollback replays the same content for late attachers
     expect(term.scrollback()).toContain(`session=${tree.sessionPath}`);
     expect(term.exited).toBe(false);
+  });
+
+  it("falls back to the login shell for commands not on the daemon PATH", async () => {
+    dir = mkdtempSync(path.join(tmpdir(), "pines-term-"));
+    const tree = makeTree(dir);
+    // "not-on-path-xyz || echo fallback-ran" only works if a shell runs it
+    term = new TerminalSession(tree, {
+      piBin: "unused",
+      termCmd: "not-on-path-xyz --session {session} || echo fallback-ran",
+    });
+    const got: string[] = [];
+    term.on("data", (d: string) => got.push(d));
+    await new Promise((r) => setTimeout(r, 900));
+    expect(got.join("")).toContain("fallback-ran");
   });
 
   it("emits exit and accepts input", async () => {
